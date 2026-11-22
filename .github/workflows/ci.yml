@@ -16,7 +16,7 @@ jobs:
           - os: windows-latest
             python-version: "3.12"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Tools for the checks
         run: sudo apt-get update && sudo apt-get install -y desktop-file-utils appstream
       - name: Validate desktop file and AppStream data
@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build the AppImage
         run: packaging/build-appimage.sh
       - name: System libraries Qt needs (an AppImage bundles Qt, not the graphics stack)
