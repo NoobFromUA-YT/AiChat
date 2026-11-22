@@ -1,6 +1,7 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.0 - 2026-11-22
+- First public release. CI covers Python 3.10 to 3.13 on Linux and Python 3.12 on Windows; the `.deb` and the AppImage are built and started in CI.
 - **Renamed to avoid clashes with other projects**: command `aichat-desktop`, Python package `aichat_desktop`, config folder `aichat-desktop` (the first start moves your files from the old `aichat` folder), env vars `AICHAT_DESKTOP_*`, desktop file / icon `aichat-desktop`.
 - `.deb`: man page, AppStream metadata, md5sums, changelog; install / purge verified in a scratch root. AppImage recipe fixed and built.
 - Icon assets renamed `icon*.png|svg`; the assets folder is a proper package (clean builds on new setuptools).
