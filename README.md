@@ -11,6 +11,18 @@ optional credit counter.
 > Not affiliated with or endorsed by Anthropic. "Claude" and "Claude Code" are Anthropic's names; this is an independent
 > project that drives the `claude` command you installed yourself.
 
+## Screenshots
+
+| | |
+|---|---|
+| ![A finished reply with code block and table](docs/screenshot-reply-dark.png) | ![Light theme, a reply streaming in](docs/screenshot-light.png) |
+| Finished reply: code block with Copy, table, cost per reply, "% left" counter | Light theme, live tool line and queued input |
+
+| | | |
+|---|---|---|
+| ![Saved chats](docs/screenshot-chats.png) | ![Settings](docs/screenshot-settings.png) | ![First-run setup](docs/screenshot-first-run.png) |
+| Saved chats | Settings | First-run setup |
+
 ## Features
 
 - **Live streaming**: while Claude works you see what it is doing (`Reading app.py`, `Running: pytest`) and the answer as it is written, not only when the whole turn is done.

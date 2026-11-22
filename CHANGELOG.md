@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- Fixed: unchecked radio buttons and checkboxes were invisible in the dark theme; the Chats list rows ran together and showed whole paths (now spaced, folder name, full path in a tooltip); the last line of wrapped text in the first-run dialog was clipped.
+- More screenshots in the README (`tools/make_screenshots.py` makes them: 2x, English locale, no real paths).
+
 ## 0.3.0 - 2026-11-22
 - First public release. CI covers Python 3.10 to 3.13 on Linux and Python 3.12 on Windows; the `.deb` and the AppImage are built and started in CI.
 - **Renamed to avoid clashes with other projects**: command `aichat-desktop`, Python package `aichat_desktop`, config folder `aichat-desktop` (the first start moves your files from the old `aichat` folder), env vars `AICHAT_DESKTOP_*`, desktop file / icon `aichat-desktop`.
