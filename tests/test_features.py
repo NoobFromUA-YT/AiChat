@@ -51,6 +51,7 @@ class Config(unittest.TestCase):
         config.save_settings({"budget": 5})
         self.assertEqual(config.settings_path().stat().st_mode & 0o777, 0o600)
 
+    @unittest.skipIf(sys.platform == "win32", "Windows uses %APPDATA% (see test_windows_uses_appdata_and_claude_exe)")
     def test_config_dir_follows_env(self):
         config.CONFIG_DIR = None
         old = {k: os.environ.get(k) for k in ("AICHAT_DESKTOP_CONFIG_DIR", "XDG_CONFIG_HOME")}
@@ -269,7 +270,7 @@ class LegacyFolder(unittest.TestCase):
         moved = config.migrate_legacy_dir(self.old, self.new)
         self.assertEqual(set(moved), {"chats", "env", "settings.json"})
         self.assertTrue((self.new / "chats" / "c1.json").is_file()); self.assertTrue((self.new / "env").is_file())
-        self.assertEqual((self.old / "config.yaml").read_text(), "someone else's file")   # untouched, folder kept
+        self.assertEqual((self.old / "config.yaml").read_text(encoding="utf-8"), "someone else's file")   # untouched, folder kept
         self.assertFalse((self.old / "env").exists())
 
     def test_empty_old_folder_is_removed(self):
@@ -307,7 +308,7 @@ class Packaging(unittest.TestCase):
 
     def test_version_is_the_same_everywhere(self):
         import re
-        proj = (self.ROOT / "pyproject.toml").read_text()
+        proj = (self.ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertEqual(re.search(r'^version = "([^"]+)"', proj, re.M).group(1), app.__version__)
 
     def test_files_a_release_needs_exist(self):
@@ -319,21 +320,21 @@ class Packaging(unittest.TestCase):
     @unittest.skipIf(sys.version_info < (3, 11), "tomllib needs Python 3.11+ (other CI versions run this)")
     def test_names_do_not_clash_with_other_projects(self):
         import tomllib
-        proj = tomllib.loads((self.ROOT / "pyproject.toml").read_text())
+        proj = tomllib.loads((self.ROOT / "pyproject.toml").read_text(encoding="utf-8"))
         self.assertEqual(list(proj["project"]["gui-scripts"]), ["aichat-desktop"])           # not `aichat`
         self.assertEqual(proj["tool"]["setuptools"]["packages"], ["aichat_desktop", "aichat_desktop.assets"])
         self.assertFalse((self.ROOT / "aichat.py").exists()); self.assertFalse((self.ROOT / "aichat").exists())
-        text = "\n".join(p.read_text() for p in (self.ROOT / "aichat_desktop").glob("*.py"))
+        text = "\n".join(p.read_text(encoding="utf-8") for p in (self.ROOT / "aichat_desktop").glob("*.py"))
         self.assertNotIn("AICHAT_CONFIG_DIR", text.replace("AICHAT_DESKTOP_CONFIG_DIR", ""))   # that variable belongs to the other aichat
 
     @unittest.skipIf(sys.version_info < (3, 11), "tomllib needs Python 3.11+ (other CI versions run this)")
     def test_author_and_links_are_filled_in(self):
         import tomllib
-        proj = tomllib.loads((self.ROOT / "pyproject.toml").read_text())["project"]
+        proj = tomllib.loads((self.ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
         self.assertEqual(proj["authors"], [{"name": "NoobFromUA"}])
         self.assertTrue(all(u.startswith("https://github.com/NoobFromUA-YT/AiChat") for u in proj["urls"].values()))
-        self.assertIn("NoobFromUA", (self.ROOT / "LICENSE").read_text())
-        self.assertNotIn("example.com", (self.ROOT / "packaging" / "build-deb.sh").read_text())
+        self.assertIn("NoobFromUA", (self.ROOT / "LICENSE").read_text(encoding="utf-8"))
+        self.assertNotIn("example.com", (self.ROOT / "packaging" / "build-deb.sh").read_text(encoding="utf-8"))
 
     def test_main_prints_version_and_help_without_a_display(self):
         import io
@@ -350,7 +351,7 @@ class Packaging(unittest.TestCase):
         written = desktop.install(home, '"/usr/bin/aichat-desktop"')
         names = {p.name for p in written}
         self.assertIn("aichat-desktop.desktop", names); self.assertIn("aichat-desktop.svg", names)
-        entry = (home / "applications" / "aichat-desktop.desktop").read_text()
+        entry = (home / "applications" / "aichat-desktop.desktop").read_text(encoding="utf-8")
         self.assertIn('Exec="/usr/bin/aichat-desktop"', entry); self.assertIn("Icon=aichat-desktop", entry)
         self.assertTrue((home / "icons/hicolor/256x256/apps/aichat-desktop.png").is_file())
         self.assertEqual(len(desktop.uninstall(home)), len(written))
@@ -386,11 +387,12 @@ class Themes(unittest.TestCase):
 class Images(unittest.TestCase):
     def setUp(self):
         self.cache = tempfile.mkdtemp(prefix="aichat-cache-")
-        self._old = os.environ.get("XDG_CACHE_HOME")
-        os.environ["XDG_CACHE_HOME"] = self.cache
+        self._old = {k: os.environ.get(k) for k in ("XDG_CACHE_HOME", "LOCALAPPDATA")}      # Linux / Windows cache roots
+        os.environ["XDG_CACHE_HOME"] = os.environ["LOCALAPPDATA"] = self.cache
 
     def tearDown(self):
-        os.environ.pop("XDG_CACHE_HOME") if self._old is None else os.environ.__setitem__("XDG_CACHE_HOME", self._old)
+        for k, v in self._old.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
 
     def test_old_images_are_cleaned_up_and_new_ones_stay(self):
         from aichat_desktop import worker
@@ -792,7 +794,7 @@ class ChatsAndExport(Base):
         self.say("How do I?"); self.reply("Like this:\n```py\nx = 1\n```")
         out = Path(tempfile.mkdtemp(prefix="aichat-exp-")) / "chat.md"
         self.w.write_export(str(out))
-        text = out.read_text()
+        text = out.read_text(encoding="utf-8")
         self.assertIn("## You", text); self.assertIn("How do I?", text); self.assertIn("```py\nx = 1\n```", text)
 
     def test_export_with_nothing_to_export_does_not_ask_for_a_file(self):

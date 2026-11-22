@@ -47,7 +47,7 @@ Run from a checkout without installing: `pip install PyQt6 && python3 -m aichat_
 | Format | How | Status |
 |---|---|---|
 | `.deb` | `packaging/build-deb.sh` → `dist/aichat-desktop_<version>_all.deb` (needs only `dpkg-deb`; depends on `python3-pyqt6`) | built; installed, configured, verified and purged in a scratch root with `dpkg`; desktop file and AppStream data validated |
-| AppImage | `packaging/build-appimage.sh` (python-appimage + appimagetool, bundles Python 3.12 and PyQt6, needs network) | built (about 100 MB); started on a private X screen |
+| AppImage | `packaging/build-appimage.sh` (python-appimage + appimagetool, bundles Python 3.12 and PyQt6, needs network) | built (about 100 MB); started on a private X screen. Bundles Python and Qt but not the graphics stack: needs the usual desktop libraries (`libegl1`, `libgl1`, `libxkbcommon0` on a minimal system) |
 
 ### Windows
 

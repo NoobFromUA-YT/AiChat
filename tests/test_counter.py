@@ -100,7 +100,7 @@ class Window(unittest.TestCase):
             self.assertIn("About $199.00 of $200", w.balance_lbl.toolTip())
             w.reset_chat()
             self.assertEqual(w.claude_cost_base, 0.0)
-            saved = json.loads(config.usage_path().read_text())
+            saved = json.loads(config.usage_path().read_text(encoding="utf-8"))
             self.assertEqual(saved["schema"], 2)
             self.assertAlmostEqual(saved["claude_spent"], 1.00, places=9)
             w.worker = None
@@ -199,7 +199,7 @@ class Claude(unittest.TestCase):
     def test_no_vertex_or_personal_paths_left(self):
         pkg = Path(app.__file__).parent
         for f in list(pkg.glob("*.py")) + [p for p in (pkg.parent / "README.md", pkg.parent / "pyproject.toml") if p.exists()]:
-            low = f.read_text().lower()
+            low = f.read_text(encoding="utf-8").lower()
             for word in ("vertex", "gemini", "aiplatform", "exec_bash", "functioncall"):
                 self.assertFalse(word in low, f"{word!r} still in {f.name}")
             self.assertIsNone(re.search(r"/home/\w+", low), f"a personal home path is still in {f.name}")

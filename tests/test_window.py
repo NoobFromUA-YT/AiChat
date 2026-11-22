@@ -366,7 +366,7 @@ class ApiKeyTests(Base):
     def test_other_env_lines_survive(self):
         config.env_path().write_text("FOO=bar\n")
         self.w.apply_key(self.NEW); self.w.apply_key("")
-        self.assertEqual(config.env_path().read_text(), "FOO=bar\n")
+        self.assertEqual(config.env_path().read_text(encoding="utf-8"), "FOO=bar\n")
 
     def test_rejected_key_is_not_saved(self):
         self.online = False
