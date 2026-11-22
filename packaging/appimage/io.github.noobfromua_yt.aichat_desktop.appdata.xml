@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.noobfromua_yt.aichat_desktop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>AI Chat</name>
+  <summary>A desktop chat window for Claude Code</summary>
+  <description>
+    <p>
+      AI Chat puts the Claude Code command line into a proper window: live progress while Claude works, a project
+      folder per chat, saved chats you can reopen and export as Markdown, and Read only, Edit files or Full auto
+      permission modes.
+    </p>
+    <p>Dark, light and system themes. Requires the separate claude command. Not affiliated with or endorsed by Anthropic.</p>
+  </description>
+  <launchable type="desktop-id">aichat-desktop.desktop</launchable>
+  <url type="homepage">https://github.com/NoobFromUA-YT/AiChat</url>
+  <url type="bugtracker">https://github.com/NoobFromUA-YT/AiChat/issues</url>
+  <developer id="io.github.noobfromua_yt"><name>NoobFromUA</name></developer>
+  <provides><binary>aichat-desktop</binary></provides>
+  <content_rating type="oars-1.1"/>
+  <categories><category>Utility</category><category>Development</category></categories>
+  <releases><release version="0.3.0" date="2026-11-22"/></releases>
+</component>

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=AI Chat
+GenericName=Claude chat
+Comment=A chat window for Claude Code
+Exec=aichat-desktop
+Icon=aichat-desktop
+Terminal=false
+Categories=Development;
+Keywords=claude;ai;chat;assistant;
+StartupWMClass=aichat-desktop

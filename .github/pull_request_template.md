@@ -1,0 +1,3 @@
+- [ ] `python tests/run.py` passes and `python -m pyflakes aichat_desktop tests tools` is clean
+- [ ] new behaviour has a test (tests use a temp config folder, never your real one)
+- [ ] `CHANGELOG.md` has a line for it

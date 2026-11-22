@@ -1,0 +1,33 @@
+.TH AICHAT-DESKTOP 1 "2026" "aichat-desktop" "User Commands"
+.SH NAME
+aichat-desktop \- desktop chat window for Claude Code
+.SH SYNOPSIS
+.B aichat-desktop
+[\fB\-\-version\fR] [\fB\-\-help\fR] [\fB\-\-install\-desktop\fR | \fB\-\-uninstall\-desktop\fR]
+.SH DESCRIPTION
+A PyQt6 window around the Claude Code command line (\fBclaude\fR): live tool and text streaming, a project folder per
+chat, saved chats with Markdown export, Read only / Edit files / Full auto permission modes, queued messages, themes and
+an optional credit counter. Requires the separate \fBclaude\fR command.
+.SH OPTIONS
+.TP
+.B \-\-version
+Print the version and exit.
+.TP
+.B \-\-install\-desktop, \-\-uninstall\-desktop
+Add or remove the application menu entry and icons under ~/.local/share (for pip / pipx installs; the .deb ships its own).
+.SH FILES
+.TP
+.I ~/.config/aichat\-desktop/
+Settings, the optional API key (env, mode 0600), saved chats and the credit counter. Override with
+.BR AICHAT_DESKTOP_CONFIG_DIR .
+.SH ENVIRONMENT
+.TP
+.B AICHAT_DESKTOP_CONFIG_DIR
+Use this folder instead of the default config folder.
+.TP
+.B AICHAT_DESKTOP_HARD_PIXELS=0
+Turn off the crisp-pixel text mode used on integer-scaled screens.
+.SH SEE ALSO
+.BR claude (1)
+.SH AUTHOR
+NoobFromUA <https://github.com/NoobFromUA-YT>
