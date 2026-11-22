@@ -29,11 +29,17 @@ class Base(unittest.TestCase):
         self.launched, self.stopped = [], []
         w, outer = self.w, self
 
+        self.pushed_to_claude, self.push_ok = [], False
+
         def launch(prompt, imgs):
             class W:
                 model = "sonnet"
                 epoch = w.epoch
                 def stop(self_): outer.stopped.append(1)
+                def push(self_, text, images=None):
+                    if outer.push_ok:
+                        outer.pushed_to_claude.append(text)
+                    return outer.push_ok
             outer.launched.append(prompt)
             w.worker = W()
         w.launch_worker = launch
@@ -59,11 +65,205 @@ class Badge(Base):
         self.assertEqual(self.state(), "busy"); self.assertIn("Thinking", self.w.badge.text())
         self.assertRegex(self.w.badge.text(), r"\d+:\d\d")
         self.assertIn("thinking", self.w.windowTitle()); self.assertTrue(self.w.stop_btn.isEnabled())
-        self.assertEqual(self.w.send_btn.text(), "Queue")
+        self.assertEqual(self.w.send_btn.text(), "Push")               # Enter hands the message to the running reply
         self.assertIn("#d13438", self.w.styleSheet().lower())          # the red of #badge[state="busy"]
         self.reply()
         self.assertEqual(self.state(), "ready"); self.assertNotIn("thinking", self.w.windowTitle())
         self.assertEqual(self.w.send_btn.text(), "Send")
+
+
+class Pushing(Base):
+    """Enter while Claude works hands the message to the running reply; Ctrl+Enter / the Queue button wait for its end."""
+
+    def setUp(self):
+        super().setUp()
+        self.push_ok = True
+
+    def test_enter_pushes_and_the_buttons_say_so(self):
+        self.say("first")
+        self.assertEqual(self.w.send_btn.text(), "Push"); self.assertFalse(self.w.queue_btn.isHidden())
+        self.assertIn("pushes your message", self.w.input_box.placeholderText())
+        self.say("also this")
+        self.assertEqual(self.pushed_to_claude, ["also this"]); self.assertEqual(self.w.queue, [])
+        self.assertEqual([p for p, _ in self.w.pushed], ["also this"]); self.assertFalse(self.w.queue_box.isHidden())
+        self.assertEqual(self.w.input_box.toPlainText(), "")
+        self.assertEqual(self.launched, ["first"])                       # no second call: it goes into the running one
+
+    def test_the_pushed_message_appears_in_the_chat_when_claude_takes_it_in(self):
+        self.say("first"); self.say("also this")
+        self.assertEqual([m["text"] for m in self.w.messages], ["first"])        # not before Claude has it
+        self.w.on_push_delivered(self.w.epoch)
+        self.assertEqual([m["text"] for m in self.w.messages], ["first", "also this"])
+        self.assertEqual(self.w.messages[-1]["kind"], "user"); self.assertIn("pushed", self.w.messages[-1]["meta"])
+        self.assertEqual(self.w.pushed, []); self.assertTrue(self.w.queue_box.isHidden())
+
+    def test_a_delivery_of_an_old_chat_is_ignored(self):
+        self.say("first"); self.say("also this")
+        self.w.on_push_delivered(self.w.epoch - 1)
+        self.assertEqual(len(self.w.messages), 1); self.assertEqual(len(self.w.pushed), 1)
+
+    def test_ctrl_enter_and_the_queue_button_wait_for_the_reply(self):
+        self.say("first")
+        self.w.input_box.setPlainText("later"); self.w.queue_message()
+        self.assertEqual(self.pushed_to_claude, []); self.assertEqual([p for p, _ in self.w.queue], ["later"])
+        self.reply(); self.assertEqual(self.launched, ["first", "later"])
+
+    def test_ctrl_enter_in_the_box_queues(self):
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+        self.say("first")
+        self.w.input_box.setPlainText("later")
+        QTest.keyClick(self.w.input_box, Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+        self.assertEqual([p for p, _ in self.w.queue], ["later"]); self.assertEqual(self.pushed_to_claude, [])
+        self.w.input_box.setPlainText("now")
+        QTest.keyClick(self.w.input_box, Qt.Key.Key_Return)
+        self.assertEqual(self.pushed_to_claude, ["now"])
+
+    def test_a_refused_push_is_queued_instead(self):
+        self.say("first"); self.push_ok = False
+        self.say("too late")
+        self.assertEqual([p for p, _ in self.w.queue], ["too late"]); self.assertEqual(self.w.pushed, [])
+
+    def test_images_travel_with_the_push(self):
+        self.say("first")
+        self.w.pending_images = [("image/png", b"PNG", "x")]
+        self.say("look at this")
+        self.assertEqual(self.w.pushed[0][1], [("image/png", b"PNG")]); self.assertEqual(self.w.pending_images, [])
+
+    def test_a_push_without_words_but_with_an_image_is_allowed(self):
+        self.say("first")
+        self.w.pending_images = [("image/png", b"PNG", "x")]
+        self.w.input_box.clear(); self.w.send_message()
+        self.assertEqual(self.pushed_to_claude, ["Describe/analyze this image."])
+
+    def test_not_while_compacting_or_stopping(self):
+        self.say("first")
+        self.w.compacting = True; self.w.refresh_badge()
+        self.assertEqual(self.w.send_btn.text(), "Queue"); self.assertTrue(self.w.queue_btn.isHidden())
+        self.say("x"); self.assertEqual(self.pushed_to_claude, []); self.assertEqual(len(self.w.queue), 1)
+        self.w.compacting = False; self.w.stopping = True
+        self.say("y"); self.assertEqual(self.pushed_to_claude, [])
+
+    def test_an_undelivered_push_goes_out_next_after_the_reply(self):
+        self.say("first"); self.say("pushed one")
+        self.reply()                                                     # the call ended without taking it in
+        self.assertEqual(self.launched, ["first", "pushed one"]); self.assertEqual(self.w.pushed, [])
+
+    def test_an_undelivered_push_waits_in_front_of_the_queue_after_a_stop(self):
+        self.say("first"); self.say("pushed one")
+        self.w.input_box.setPlainText("queued one"); self.w.queue_message()
+        self.w.stop_generation(); self.reply("(stopped)", ok=False)
+        self.assertEqual([p for p, _ in self.w.queue], ["pushed one", "queued one"])
+        self.assertEqual(self.state(), "paused"); self.assertEqual(self.launched, ["first"])
+
+    def test_new_chat_forgets_pushed_messages(self):
+        self.say("first"); self.say("pushed one")
+        self.w.reset_chat(); self.assertEqual(self.w.pushed, []); self.assertTrue(self.w.queue_box.isHidden())
+
+    def test_a_second_turn_is_shown_while_claude_keeps_working(self):
+        self.say("first"); self.say("pushed one")
+        self.w.on_reply("answer one", "", 0.1, ("sid-1", 0.1, True, False, False), final=False)
+        self.assertTrue(self.w.busy); self.assertEqual(self.state(), "busy")
+        self.assertEqual([m["text"] for m in self.w.messages if m["kind"] == "assistant"], ["answer one"])
+        self.assertEqual(self.w.pushed and len(self.w.pushed), 1)       # still waiting for the delivery
+        self.w.on_push_delivered(self.w.epoch)
+        self.w.on_reply("answer two", "", 0.2, ("sid-1", 0.3, True, False, False))
+        self.assertFalse(self.w.busy)
+        self.assertEqual([m["text"] for m in self.w.messages], ["first", "answer one", "pushed one", "answer two"])
+        self.assertAlmostEqual(self.w.usage["claude_spent"], 0.3); self.assertEqual(self.launched, ["first"])
+
+    def test_the_closing_event_of_a_give_up_shows_no_empty_card(self):
+        self.say("first")
+        self.w.on_reply("answer one", "", 0.1, ("sid-1", 0.1, True, False, False), final=False)
+        self.w.on_reply("", "", 0.0, ("sid-1", 0.1, True, False, True))
+        self.assertEqual([m["text"] for m in self.w.messages], ["first", "answer one"]); self.assertFalse(self.w.busy)
+
+    def test_push_now_moves_a_queued_message_into_the_reply(self):
+        self.say("first")
+        self.w.input_box.setPlainText("waiting"); self.w.queue_message()
+        item = self.w.queue[0]
+        self.assertEqual(len(self.w.row_push_btns), 1); self.assertFalse(self.w.row_push_btns[0].isHidden())
+        self.w.push_queued(item)
+        self.assertEqual(self.pushed_to_claude, ["waiting"]); self.assertEqual(self.w.queue, [])
+        self.assertEqual([p for p, _ in self.w.pushed], ["waiting"])
+
+    def test_push_now_that_fails_keeps_the_message_queued(self):
+        self.say("first")
+        self.w.input_box.setPlainText("waiting"); self.w.queue_message()
+        self.push_ok = False
+        self.w.push_queued(self.w.queue[0])
+        self.assertEqual([p for p, _ in self.w.queue], ["waiting"]); self.assertEqual(self.w.pushed, [])
+
+    def test_push_now_is_hidden_when_nothing_runs(self):
+        self.say("first"); self.w.input_box.setPlainText("waiting"); self.w.queue_message()
+        self.w.stop_generation(); self.reply("(stopped)", ok=False)
+        self.assertTrue(self.w.row_push_btns[0].isHidden())
+
+
+class EditQueue(Base):
+    """A queued message can be changed, not just deleted."""
+
+    def edit_with(self, item, new_text, before=None):
+        """Run edit_queued with a stand-in dialog that 'saves' new_text (before() runs while the dialog is open)."""
+        outer = self
+
+        class FakeDialog:
+            def __init__(self_, parent, text, n_images=0):
+                outer.dialog_args = (text, n_images)
+            def exec(self_):
+                if before:
+                    before()
+                return True
+            def text(self_):
+                return new_text
+        orig, app.EditMessageDialog = app.EditMessageDialog, FakeDialog
+        try:
+            self.w.edit_queued(item)
+        finally:
+            app.EditMessageDialog = orig
+
+    def test_edit_keeps_position_and_images(self):
+        self.say("one"); self.say("two")
+        self.w.pending_images = [("image/png", b"PNG", "x")]
+        self.say("three"); self.say("four")
+        item = self.w.queue[1]
+        self.edit_with(item, "THREE, fixed")
+        self.assertEqual([p for p, _ in self.w.queue], ["two", "THREE, fixed", "four"])
+        self.assertEqual(self.w.queue[1][1], [("image/png", b"PNG")]); self.assertEqual(self.dialog_args, ("three", 1))
+
+    def test_edited_message_is_what_gets_sent(self):
+        self.say("one"); self.say("two"); self.edit_with(self.w.queue[0], "two, better")
+        self.reply(); self.assertEqual(self.launched, ["one", "two, better"])
+
+    def test_row_has_edit_push_and_remove_buttons(self):
+        from PyQt6.QtWidgets import QPushButton
+        self.say("one"); self.say("two")
+        names = [b.text() for b in self.w.queue_box.findChildren(QPushButton)]
+        self.assertEqual(sorted(names), sorted(["Edit", "Push now", "\u00d7"]))
+
+    def test_message_that_was_sent_while_the_dialog_was_open(self):
+        from unittest import mock
+        self.say("one"); self.say("two")
+        item = self.w.queue[0]
+        with mock.patch.object(app.QMessageBox, "information") as info:
+            self.edit_with(item, "changed", before=lambda: self.reply())          # the queue moves on: 'two' is sent
+        self.assertTrue(info.called); self.assertEqual(self.launched, ["one", "two"]); self.assertEqual(self.w.queue, [])
+
+    def test_a_message_no_longer_queued_is_ignored(self):
+        self.say("one"); self.say("two")
+        item = self.w.queue[0]; self.w.remove_queued(0)
+        self.edit_with(item, "x"); self.assertEqual(self.w.queue, [])
+        self.assertFalse(hasattr(self, "dialog_args"))
+
+    def test_the_dialog_needs_words_or_an_image(self):
+        from aichat_desktop.dialogs import EditMessageDialog
+        from PyQt6.QtWidgets import QDialogButtonBox
+        d = EditMessageDialog(self.w, "hello", 0)
+        save = d.buttons.button(QDialogButtonBox.StandardButton.Save)
+        self.assertTrue(save.isEnabled()); d.edit.setPlainText("   "); self.assertFalse(save.isEnabled())
+        d.edit.setPlainText("new  \n"); self.assertTrue(save.isEnabled()); self.assertEqual(d.text(), "new")
+        d2 = EditMessageDialog(self.w, "", 2)
+        self.assertTrue(d2.buttons.button(QDialogButtonBox.StandardButton.Save).isEnabled()); self.assertIn("2 images", d2.findChild(app.QLabel).text())
 
 
 class Queue(Base):

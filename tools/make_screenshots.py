@@ -2,6 +2,7 @@
 """Render the screenshots in docs/ from scripted demo data (offscreen, temp config, neutral project folder, 2x pixels).
    docs/screenshot-dark.png / -light.png      the main window, a reply streaming in
    docs/screenshot-reply-dark.png             a finished reply (code block with Copy, table)
+   docs/screenshot-queue-dark.png             a message pushed into the running reply, two queued ones
    docs/screenshot-settings.png               Settings
    docs/screenshot-first-run.png              the first-run dialog
    docs/screenshot-chats.png                  saved chats
@@ -96,12 +97,30 @@ def main() -> int:
     shot(w, "reply-dark", qapp)
     w.input_box.setPlainText("Now add a test for blank lines too.")
     w.send_message()
+    class Pusher:                           # stands in for the running call: it takes pushed messages
+        epoch = w.epoch
+        model = "sonnet"
+        def push(self, text, images=None): return True
+        def stop(self): pass
+    w.worker = Pusher()
+    w.refresh_badge()
     w.on_progress("tool", "Editing test_streaming.py")
     w.on_progress("text", "Adding a case for blank and whitespace-only lines next to the existing\nparser tests…")
     for name in ("dark", "light"):
         w.apply_settings({"theme": name})
         w.flush_live_text()
         shot(w, name, qapp)
+
+    # a message pushed into the running reply, and two queued ones (the stand-in worker accepts the push)
+    w.apply_settings({"theme": "dark"})
+    w.input_box.setPlainText("Also keep the old behaviour for events without a type field.")
+    w.send_message()
+    for text in ("When that is done, update the CHANGELOG.", "Then bump the version to 0.4.0 and tag it."):
+        w.input_box.setPlainText(text)
+        w.queue_message()
+    w.refresh_badge()
+    w.chat_view.verticalScrollBar().setValue(0)
+    shot(w, "queue-dark", qapp)
 
     # dialogs (dark)
     w.apply_settings({"theme": "dark"})

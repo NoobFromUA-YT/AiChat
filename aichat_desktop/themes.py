@@ -114,7 +114,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: @bg@; }
 #xbtn:hover { background: @busy_bg@; border-color: @busy_border@; color: @on_color@; }
 #sendBtn { background: @send_bg@; border-color: @accent@; color: @on_color@; font-weight: bold; }
 #sendBtn:hover { background: @send_hover@; }
-#sendBtn[queueing="true"] { background: @warn_bg@; border-color: @warn_border@; color: @warn_fg@; }
+#queueBtn { background: @warn_bg@; border-color: @warn_border@; color: @warn_fg@; font-weight: bold; }
 #liveBox { background: @chat_bg@; border: 1px solid @chat_border@; border-radius: 6px; }
 #liveBox QWidget { background: @chat_bg@; color: @chat_fg@; }
 #liveTool { color: @live_tool@; font-weight: bold; }

@@ -205,6 +205,139 @@ class Claude(unittest.TestCase):
             self.assertIsNone(re.search(r"/home/\w+", low), f"a personal home path is still in {f.name}")
 
 
+FAKE_HEAD = (
+    "#!/usr/bin/env python3\nimport json, os, sys, time, select\n"
+    "def out(o): print(json.dumps(o), flush=True)\n"
+    "def echo(m): out({'type': 'user', 'message': m['message'], 'session_id': 's1'})\n"
+    "buf = b''\n"
+    "def wait_line(secs):   # raw reads: a buffered readline would hide a second line from select\n"
+    "    global buf\n"
+    "    end = time.time() + secs\n"
+    "    while True:\n"
+    "        if b'\\n' in buf:\n"
+    "            line, buf = buf.split(b'\\n', 1)\n"
+    "            return json.loads(line)\n"
+    "        if time.time() >= end: return 'timeout'\n"
+    "        if select.select([0], [], [], 0.05)[0]:\n"
+    "            data = os.read(0, 65536)\n"
+    "            if not data: return None\n"
+    "            buf += data\n"
+    "first = wait_line(5)\n"
+    "out({'type': 'system', 'subtype': 'init', 'session_id': 's1'})\n"
+    "echo(first)\n"
+)
+# a message pushed while the tool runs is read at the end of the tool: one reply answers both
+FAKE_STEER = FAKE_HEAD + (
+    "out({'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'id': 't1', 'name': 'Bash', 'input': {'command': 'sleep'}}]}})\n"
+    "got = wait_line(1.0)\n"
+    "n = 0\n"
+    "if isinstance(got, dict): echo(got); n = 1\n"
+    "out({'type': 'result', 'is_error': False, 'result': 'done:%d' % n, 'session_id': 's1', 'total_cost_usd': 0.5})\n"
+)
+# a message pushed while only text is written becomes a second turn after the first result
+FAKE_TWO_TURNS = FAKE_HEAD + (
+    "time.sleep(0.6)\n"
+    "out({'type': 'result', 'is_error': False, 'result': 'r1', 'session_id': 's1', 'total_cost_usd': 0.1})\n"
+    "got = wait_line(5)\n"
+    "if isinstance(got, dict):\n"
+    "    echo(got); out({'type': 'result', 'is_error': False, 'result': 'r2', 'session_id': 's1', 'total_cost_usd': 0.3})\n"
+    "    wait_line(5)\n"
+)
+# the first result, then it never answers the pushed message
+FAKE_DEAF = FAKE_HEAD + (
+    "time.sleep(0.6)\n"
+    "out({'type': 'result', 'is_error': False, 'result': 'r1', 'session_id': 's1', 'total_cost_usd': 0.1})\n"
+    "while wait_line(5) not in (None, 'timeout'): pass\n"
+)
+
+
+@unittest.skipIf(sys.platform == "win32", "the fake claude is a #! script")
+class Pushing(unittest.TestCase):
+    """A message handed to the running call (stdin stays open until the last turn is done)."""
+
+    def _run(self, script, push_after=None, texts=("extra",), base=0.0):
+        import threading
+        wk = worker_mod.ChatWorker("sonnet", "high", "start", [], None, dict(os.environ), base, claude_bin=make_fake(script))
+        self.turns, self.delivered, self.pushes = [], [], []
+        wk.turn_done.connect(lambda reply, meta, cost, st: self.turns.append((reply, cost, st)))
+        wk.push_delivered.connect(lambda: self.delivered.append(1))
+        if push_after is not None:
+            def later():
+                for t in texts:
+                    self.pushes.append(wk.push(t))
+            threading.Timer(push_after, later).start()
+        self.final = wk._run_claude()
+        return wk
+
+    def test_command_reads_the_messages_from_stdin(self):
+        cmd = worker_mod.ChatWorker("sonnet", "high", "hi", [], None, {}, 0.0, claude_bin="/bin/claude").build_command()
+        self.assertEqual(cmd[cmd.index("--input-format") + 1], "stream-json")
+        self.assertIn("--replay-user-messages", cmd); self.assertNotIn("hi", cmd)
+
+    def test_push_during_a_tool_is_answered_in_the_same_reply(self):
+        wk = self._run(FAKE_STEER, push_after=0.3)
+        self.assertEqual(self.pushes, [True]); self.assertEqual(self.final[0], "done:1")
+        self.assertEqual(self.delivered, [1]); self.assertEqual(self.turns, []); self.assertEqual(wk.undelivered, 0)
+        self.assertAlmostEqual(wk.cost_total, 0.5)
+
+    def test_without_a_push_the_call_ends_by_itself(self):
+        wk = self._run(FAKE_STEER)
+        self.assertEqual(self.final[0], "done:0"); self.assertEqual(self.delivered, [])
+        self.assertFalse(wk.push("too late"))                       # the call is over: the window queues it instead
+
+    def test_push_while_writing_text_becomes_a_second_turn(self):
+        wk = self._run(FAKE_TWO_TURNS, push_after=0.2, base=0.0)
+        self.assertEqual(self.pushes, [True])
+        self.assertEqual([t[0] for t in self.turns], ["r1"]); self.assertAlmostEqual(self.turns[0][1], 0.1)
+        self.assertEqual(self.turns[0][2][:3], ("s1", 0.1, True))
+        self.assertEqual(self.final[0], "r2"); self.assertAlmostEqual(self.final[2], 0.2)      # priced as the step from the first total
+        self.assertEqual(self.delivered, [1]); self.assertAlmostEqual(wk.cost_total, 0.3); self.assertTrue(wk.ok)
+
+    def test_two_pushes_are_taken_in_one_by_one(self):
+        script = FAKE_HEAD + (
+            "time.sleep(0.6)\nout({'type': 'result', 'result': 'r1', 'session_id': 's1', 'total_cost_usd': 0.1})\n"
+            "for i in range(2):\n"
+            "    g = wait_line(5)\n"
+            "    if isinstance(g, dict): echo(g)\n"
+            "out({'type': 'result', 'result': 'r2', 'session_id': 's1', 'total_cost_usd': 0.2})\n"
+        )
+        wk = self._run(script, push_after=0.2, texts=("one", "two"))
+        self.assertEqual(self.pushes, [True, True]); self.assertEqual(self.delivered, [1, 1]); self.assertEqual(wk.undelivered, 0)
+        self.assertEqual(self.final[0], "r2")
+
+    def test_a_push_claude_never_answers_is_given_back(self):
+        old = worker_mod.GIVE_UP_SECONDS
+        worker_mod.GIVE_UP_SECONDS = 0.5
+        try:
+            wk = self._run(FAKE_DEAF, push_after=0.2)
+        finally:
+            worker_mod.GIVE_UP_SECONDS = old
+        self.assertEqual([t[0] for t in self.turns], ["r1"])         # the first reply was shown at once
+        self.assertEqual(self.final[0], ""); self.assertTrue(wk.silent_final)       # nothing more to show
+        self.assertEqual(wk.undelivered, 1); self.assertEqual(self.delivered, [])
+
+    def test_stop_during_a_push_wait_ends_the_call(self):
+        import threading
+        wk = worker_mod.ChatWorker("sonnet", "high", "start", [], None, dict(os.environ), 0.0, claude_bin=make_fake(FAKE_DEAF))
+        threading.Timer(0.3, lambda: (wk.push("x"), wk.stop())).start()
+        self.assertEqual(wk._run_claude()[0], "(stopped)"); self.assertFalse(wk.ok)
+        self.assertFalse(wk.push("after stop"))
+
+    def test_images_of_a_push_are_saved_and_named_in_the_text(self):
+        with tempfile.TemporaryDirectory() as d:
+            old_env = os.environ.get("XDG_CACHE_HOME")
+            os.environ["XDG_CACHE_HOME"] = d
+            try:
+                text = worker_mod.ChatWorker.with_images("look", [("image/png", b"\x89PNG")])
+                saved = list((Path(d) / config.APP_DIR / "images").glob("aichat_*.png"))
+            finally:
+                if old_env is None:
+                    os.environ.pop("XDG_CACHE_HOME", None)
+                else:
+                    os.environ["XDG_CACHE_HOME"] = old_env
+            self.assertEqual(len(saved), 1); self.assertIn(str(saved[0]), text); self.assertTrue(text.startswith("look"))
+
+
 class Portable(unittest.TestCase):
     """Worker pieces that need no fake program (run on every OS)."""
 
@@ -213,7 +346,7 @@ class Portable(unittest.TestCase):
                                    ("edit", "acceptEdits", "--dangerously-skip-permissions"),
                                    ("full", "--dangerously-skip-permissions", "--permission-mode")):
             wk = worker_mod.ChatWorker("sonnet", "high", "hi", [], "sid9", {}, 0.0, permission=mode, claude_bin="/bin/claude")
-            cmd = wk.build_command("hi")
+            cmd = wk.build_command()
             self.assertIn(want, cmd); self.assertNotIn(forbid, cmd)
             self.assertEqual(cmd[cmd.index("--resume") + 1], "sid9")
             self.assertIn("stream-json", cmd); self.assertIn("--include-partial-messages", cmd)

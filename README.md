@@ -1,7 +1,7 @@
 # AI Chat (aichat-desktop)
 
 A desktop chat window for [Claude Code](https://claude.com/claude-code). It runs the `claude` command for you and gives
-it a proper window: live progress, a project folder per chat, saved chats, safe permission modes, queued messages and an
+it a proper window: live progress, a project folder per chat, saved chats, safe permission modes, pushing a message into a running reply, a message queue you can edit and an
 optional credit counter.
 
 ![AI Chat, dark theme](docs/screenshot-dark.png)
@@ -16,7 +16,11 @@ optional credit counter.
 | | |
 |---|---|
 | ![A finished reply with code block and table](docs/screenshot-reply-dark.png) | ![Light theme, a reply streaming in](docs/screenshot-light.png) |
-| Finished reply: code block with Copy, table, cost per reply, "% left" counter | Light theme, live tool line and queued input |
+| Finished reply: code block with Copy, table, cost per reply, "% left" counter | Light theme, live tool line, Push and Queue buttons |
+
+![A pushed message and two queued ones](docs/screenshot-queue-dark.png)
+
+<sub>A message pushed into the running reply, and two queued ones that can be edited, pushed now or removed.</sub>
 
 | | | |
 |---|---|---|
@@ -30,7 +34,9 @@ optional credit counter.
 - **Permission modes** (next to the model box): **Read only** (default: Claude can read and search, nothing else), **Edit files**, **Full auto** (anything, asks you to confirm first). What a mode forbids is refused, and the reply tells you which tool was refused.
 - **Saved chats**: every chat is kept; **Chats** lists, opens, renames and deletes them. The open chat comes back after a restart.
 - **Copy and export**: a *Copy* link on every reply and every code block; **Export** saves the chat as Markdown.
-- **Message queue**: keep typing while Claude works; messages go out one by one. Stop pauses the queue.
+- **Push a message while Claude works**: type and press Enter; Claude reads it at its next step (after the tool it is running) and answers both in the same reply. If it is only writing text, your message becomes the next turn right after.
+- **Message queue**: **Ctrl+Enter** (or the Queue button) keeps a message for after the reply instead. Queued messages go out one by one, can be **edited** (or pushed into the running reply with **Push now**) and removed. Stop pauses the queue.
+- **Clean pasting**: the message box takes plain text only. Fonts, colours and backgrounds from web pages and documents are dropped, and invisible characters (zero-width spaces, no-break spaces, direction marks) are removed. Screenshots still paste as images.
 - **Rendered replies**: headings, tables, lists, code blocks, links. Replies are HTML-escaped first.
 - **Themes**: dark, light, "dark window with light chat", or follow the desktop (Settings → Colours); switches live.
 - **Images**: paste a screenshot (Ctrl+V) or attach files.
@@ -40,7 +46,7 @@ optional credit counter.
 
 You need **Python 3.10+**, **Qt 6 for Python (PyQt6)** and the **`claude` command** (install it from
 <https://claude.com/claude-code> and run `claude` once to sign in). Developed and tested with Claude Code 2.1; the window
-passes `--effort`, `--include-partial-messages` and `--permission-mode`, so very old versions will not work.
+passes `--effort`, `--include-partial-messages`, `--permission-mode`, `--input-format stream-json` and `--replay-user-messages`, so very old versions will not work.
 
 ```bash
 # from a checkout, any of these

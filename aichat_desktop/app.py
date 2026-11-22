@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, chats, config, display, mdhtml, themes
+from . import __version__, chats, config, display, mdhtml, pasting, themes
 from .costs import (
     CTX_WARN,
     balance_label,
@@ -42,7 +42,7 @@ from .costs import (
     save_usage,
     set_anchor,
 )
-from .dialogs import ChatsDialog, FirstRunDialog, KeyDialog, SettingsDialog
+from .dialogs import ChatsDialog, EditMessageDialog, FirstRunDialog, KeyDialog, SettingsDialog
 from .display import S
 from .export import export_markdown
 from .mdhtml import md_to_html, plain_html
@@ -61,30 +61,42 @@ class ClickLabel(QLabel):
 
 
 class PromptEdit(QTextEdit):
-    """Input box that sends on Enter and supports pasting screenshots (Ctrl+V)."""
+    """Message box: Enter sends / pushes, Ctrl+Enter queues, Shift+Enter adds a line. Pastes plain text and screenshots only."""
 
     send_requested = pyqtSignal()
+    queue_requested = pyqtSignal()
     image_pasted = pyqtSignal(QImage)
 
-    def keyPressEvent(self, event: QKeyEvent | None) -> None:
+    def __init__(self, *args) -> None:
+        super().__init__(*args)
+        self.setAcceptRichText(False)          # typed and dropped text stays plain too
+
+    def keyPressEvent(self, event: QKeyEvent | None) -> None:  # noqa: N802
         if event and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            if not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            mods = event.modifiers()
+            if mods & Qt.KeyboardModifier.ControlModifier:
+                self.queue_requested.emit()
+                return
+            if not (mods & Qt.KeyboardModifier.ShiftModifier):
                 self.send_requested.emit()
                 return
-        if event and event.matches(QKeyEvent.StandardKey.Paste) if hasattr(QKeyEvent, "StandardKey") else False:
-            pass
-        if (
-            event
-            and event.key() == Qt.Key.Key_V
-            and (event.modifiers() & Qt.KeyboardModifier.ControlModifier)
-        ):
-            md = QApplication.clipboard().mimeData()
-            if md and md.hasImage():
-                img = QApplication.clipboard().image()
-                if not img.isNull():
-                    self.image_pasted.emit(img)
-                    return
         super().keyPressEvent(event)
+
+    def canInsertFromMimeData(self, source) -> bool:  # noqa: N802
+        return bool(source and (source.hasText() or source.hasHtml() or source.hasImage() or source.hasUrls()))
+
+    def insertFromMimeData(self, source) -> None:  # noqa: N802
+        """Ctrl+V, Shift+Insert, the Paste menu entry and drag & drop all end here."""
+        if source is None:
+            return
+        text = pasting.plain_text_of(source)
+        if text:
+            self.insertPlainText(text)
+            return
+        if source.hasImage():
+            img = source.imageData()
+            if isinstance(img, QImage) and not img.isNull():
+                self.image_pasted.emit(img)
 
 
 class AIChatWindow(QMainWindow):
@@ -118,6 +130,8 @@ class AIChatWindow(QMainWindow):
         self.epoch = 0                # New Chat bumps it: a late reply of an older chat is not shown
         self.queue: list[tuple[str, list[tuple[str, bytes]]]] = []
         self.queue_paused = False     # after Stop or an error the queue waits for the user
+        self.pushed: list[tuple[str, list[tuple[str, bytes]]]] = []   # handed to the running reply, not yet taken in by Claude
+        self.row_push_btns: list[QPushButton] = []
         self.t0 = 0.0
         self.ready_text = "\u25cf Ready"
         self.messages: list[dict] = []
@@ -272,6 +286,7 @@ class AIChatWindow(QMainWindow):
         self.input_box.setObjectName("inputBox")
         self.input_box.setMaximumHeight(S(84))
         self.input_box.send_requested.connect(self.send_message)
+        self.input_box.queue_requested.connect(self.queue_message)
         self.input_box.image_pasted.connect(self.add_qimage)
         bottom.addWidget(self.input_box, 1)
 
@@ -279,8 +294,17 @@ class AIChatWindow(QMainWindow):
         self.send_btn.setObjectName("sendBtn")
         self.send_btn.setMinimumHeight(S(40))
         self.send_btn.setMinimumWidth(S(76))
-        self.send_btn.clicked.connect(self.send_message)
+        self.send_btn.clicked.connect(lambda _=False: self.send_message())
         bottom.addWidget(self.send_btn)
+
+        self.queue_btn = QPushButton("Queue")           # only while Claude works: send after the reply instead of pushing
+        self.queue_btn.setObjectName("queueBtn")
+        self.queue_btn.setMinimumHeight(S(40))
+        self.queue_btn.setMinimumWidth(S(76))
+        self.queue_btn.setToolTip("Send this message when the running reply is done (Ctrl+Enter)")
+        self.queue_btn.clicked.connect(lambda _=False: self.queue_message())
+        self.queue_btn.setVisible(False)
+        bottom.addWidget(self.queue_btn)
 
         self.stop_btn = QPushButton("Stop")
         self.stop_btn.setObjectName("stopBtn")
@@ -540,33 +564,47 @@ class AIChatWindow(QMainWindow):
             self.badge.style().polish(self.badge)
         # the title shows it in the taskbar when the window is behind others
         self.setWindowTitle(f"\u25cf {self.base_title} \u2014 thinking\u2026" if self.busy else self.base_title)
-        queueing = self.busy
+        pushing = self.can_push()
         resume = bool(self.queue) and self.queue_paused and not self.busy
-        self.send_btn.setText("Queue" if queueing else ("Resume" if resume else "Send"))
-        self.send_btn.setProperty("queueing", "true" if queueing else "false")
-        self.send_btn.style().unpolish(self.send_btn)
-        self.send_btn.style().polish(self.send_btn)
+        self.send_btn.setText(("Push" if pushing else "Queue") if self.busy else ("Resume" if resume else "Send"))
+        self.send_btn.setToolTip(
+            "Claude reads this at its next step, while it is still working (Enter)" if pushing else
+            "Send this message when the running reply is done" if self.busy else "")
+        self.queue_btn.setVisible(pushing)
+        for b in self.row_push_btns:
+            b.setVisible(pushing)
         self.stop_btn.setEnabled(self.busy and not self.stopping)
         self.compact_btn.setEnabled(not self.busy and bool(self.claude_sid))
-        self.input_box.setPlaceholderText(
-            "Claude is working \u2014 Enter adds your message to the queue, it is sent when the reply is done"
-            if self.busy else
-            "Message Claude\u2026  Enter sends \u00b7 Shift+Enter new line \u00b7 Ctrl+V pastes a screenshot"
-        )
+        if not self.busy:
+            hint = "Message Claude\u2026  Enter sends \u00b7 Shift+Enter new line \u00b7 Ctrl+V pastes a screenshot"
+        elif pushing:
+            hint = "Claude is working \u2014 Enter pushes your message into the reply \u00b7 Ctrl+Enter sends it after the reply"
+        else:
+            hint = "Claude is working \u2014 Enter adds your message to the queue, it is sent when the reply is done"
+        self.input_box.setPlaceholderText(hint)
+
+    def can_push(self) -> bool:
+        """A message can be handed to the running reply (not while stopping, not during /compact, not with a worker that cannot)."""
+        return self.busy and not self.stopping and not self.compacting and callable(getattr(self.worker, "push", None))
 
     def refresh_queue_ui(self) -> None:
         while self.queue_lay.count():
             item = self.queue_lay.takeAt(0)
-            if item and item.widget():
-                item.widget().deleteLater()
-        for idx, (prompt, imgs) in enumerate(self.queue):
+            gone = item.widget() if item else None
+            if gone is not None:
+                gone.hide()
+                gone.setParent(None)              # not painted again while it waits for deleteLater
+                gone.deleteLater()
+        self.row_push_btns = []
+
+        def row_for(tag_text: str, prompt: str, imgs: list) -> tuple[QFrame, QHBoxLayout]:
             row = QFrame()
             row.setObjectName("queueRow")
             row.setMinimumHeight(S(38))
             h = QHBoxLayout(row)
             h.setContentsMargins(S(10), S(4), S(4), S(4))
             h.setSpacing(S(10))
-            tag = QLabel(f"Queued {idx + 1}")
+            tag = QLabel(tag_text)
             tag.setObjectName("queueTag")
             text = (prompt or "(image)").replace("\n", " ")
             text = text if len(text) <= 110 else text[:109] + "\u2026"
@@ -574,16 +612,67 @@ class AIChatWindow(QMainWindow):
                 text += f"  [+{len(imgs)} img]"
             body = QLabel(text)
             body.setToolTip(prompt)
+            h.addWidget(tag)
+            h.addWidget(body, 1)
+            self.queue_lay.addWidget(row)
+            return row, h
+
+        for prompt, imgs in self.pushed:
+            row, _ = row_for("Pushed", prompt, imgs)
+            row.setToolTip("Handed to Claude: it reads this at its next step and the message then appears in the chat")
+        for idx, (prompt, imgs) in enumerate(self.queue):
+            row, h = row_for(f"Queued {idx + 1}", prompt, imgs)
+            item = self.queue[idx]
+            push = QPushButton("Push now")
+            push.setToolTip("Hand this message to the running reply instead of waiting")
+            push.setMinimumHeight(S(28))
+            push.clicked.connect(lambda _=False, it=item: self.push_queued(it))
+            push.setVisible(self.can_push())
+            self.row_push_btns.append(push)
+            edit = QPushButton("Edit")
+            edit.setToolTip("Change the text of this message")
+            edit.setMinimumHeight(S(28))
+            edit.clicked.connect(lambda _=False, it=item: self.edit_queued(it))
             x = QPushButton("\u00d7")
             x.setObjectName("xbtn")
             x.setFixedSize(S(28), S(28))
             x.setToolTip("Remove from the queue")
             x.clicked.connect(lambda _=False, i=idx: self.remove_queued(i))
-            h.addWidget(tag)
-            h.addWidget(body, 1)
+            h.addWidget(push)
+            h.addWidget(edit)
             h.addWidget(x)
-            self.queue_lay.addWidget(row)
-        self.queue_box.setVisible(bool(self.queue))
+        self.queue_box.setVisible(bool(self.queue or self.pushed))
+
+    def _queue_index(self, item: tuple) -> int:
+        """Where `item` stands now (the queue moves on while a dialog is open); -1 when it has been sent already."""
+        for i, q in enumerate(self.queue):
+            if q is item:
+                return i
+        return -1
+
+    def edit_queued(self, item: tuple[str, list[tuple[str, bytes]]]) -> None:
+        if self._queue_index(item) < 0:
+            return
+        prompt, imgs = item
+        dlg = EditMessageDialog(self, prompt, len(imgs))
+        if not dlg.exec():
+            return
+        idx = self._queue_index(item)
+        if idx < 0:
+            QMessageBox.information(self, "Edit message", "That message has already been sent.")
+            return
+        self.queue[idx] = (dlg.text(), imgs)
+        self.refresh_queue_ui()
+
+    def push_queued(self, item: tuple[str, list[tuple[str, bytes]]]) -> None:
+        """'Push now' on a queued message: it goes to the running reply instead of waiting for it."""
+        idx = self._queue_index(item)
+        if idx < 0 or not self.can_push():
+            return
+        if self.try_push(item):
+            del self.queue[idx]
+            self.refresh_queue_ui()
+            self.refresh_badge()
 
     def remove_queued(self, idx: int) -> None:
         if 0 <= idx < len(self.queue):
@@ -674,7 +763,7 @@ class AIChatWindow(QMainWindow):
         self.chat_view.setHtml(
             f'<p align="center" style="color:{self.theme["hint"]};margin-top:{S(60)}px;font-size:{S(17)}px">Ask Claude anything.</p>'
             f'<p align="center" style="color:{self.theme["hint"]};font-size:{S(14)}px">Enter sends · Shift+Enter adds a line · '
-            'Ctrl+V pastes a screenshot<br>While Claude is working, Enter queues your next message — no waiting.</p>' + extra
+            'Ctrl+V pastes a screenshot<br>While Claude is working, Enter pushes your next message into the reply, Ctrl+Enter queues it.</p>' + extra
         )
         self.showing_hint = True
 
@@ -774,6 +863,7 @@ class AIChatWindow(QMainWindow):
             return
         self.epoch += 1
         self.queue.clear()
+        self.pushed.clear()
         self.queue_paused = False
         self.clear_images()
         self.clear_live()
@@ -810,6 +900,7 @@ class AIChatWindow(QMainWindow):
     def reset_chat(self) -> None:
         self.epoch += 1               # a reply still on its way belongs to the old chat and is dropped
         self.queue.clear()
+        self.pushed.clear()
         self.queue_paused = False
         if self.busy and self.worker is not None:
             self.stopping = True
@@ -828,6 +919,27 @@ class AIChatWindow(QMainWindow):
         self.refresh_badge()
 
     def send_message(self) -> None:
+        """Enter / the Send button: starts a reply; while Claude works it pushes the message into that reply."""
+        self._submit(push=True)
+
+    def queue_message(self) -> None:
+        """Ctrl+Enter / the Queue button: the message waits until the running reply is done."""
+        self._submit(push=False)
+
+    def try_push(self, item: tuple[str, list[tuple[str, bytes]]]) -> bool:
+        """Hand a message to the running reply. False = Claude can no longer take it (the call just ended)."""
+        prompt, imgs = item
+        try:
+            ok = bool(self.worker.push(prompt or "Describe/analyze this image.", imgs))     # type: ignore[union-attr]
+        except Exception:
+            ok = False
+        if ok:
+            self.pushed.append(item)
+            self.refresh_queue_ui()
+            self.refresh_badge()
+        return ok
+
+    def _submit(self, push: bool) -> None:
         prompt = self.input_box.toPlainText().strip()
         imgs = [(m, b) for m, b, _ in self.pending_images]
         if not prompt and not imgs:
@@ -838,8 +950,10 @@ class AIChatWindow(QMainWindow):
         self.input_box.clear()
         self.clear_images()
         item = (prompt, imgs)
-        if self.busy:                                                    # wait behind the running reply
-            self.queue.append(item)
+        if self.busy:
+            if push and self.can_push() and self.try_push(item):
+                return
+            self.queue.append(item)                                      # wait behind the running reply
             self.refresh_queue_ui()
             self.refresh_badge()
         elif self.queue:                                                 # a paused queue: new message goes last, all go on
@@ -848,6 +962,16 @@ class AIChatWindow(QMainWindow):
             self.start_next()
         else:
             self.start_item(item)
+
+    def on_push_delivered(self, epoch: int) -> None:
+        """Claude took the oldest pushed message in: it now shows in the chat, at the point where Claude read it."""
+        if epoch != self.epoch or not self.pushed:
+            return
+        prompt, imgs = self.pushed.pop(0)
+        img_note = f" [+{len(imgs)} img]" if imgs else ""
+        self.append_msg("You", (prompt or "(image)") + img_note, "user", "pushed while working")
+        self.refresh_queue_ui()
+        self.refresh_badge()
 
     def start_next(self) -> None:
         if not self.queue:
@@ -880,6 +1004,8 @@ class AIChatWindow(QMainWindow):
         self.worker.epoch = self.epoch
         self.worker.progress.connect(lambda kind, value, ep=self.epoch: self.on_progress(kind, value, ep))
         self.worker.finished_reply.connect(self.on_reply)
+        self.worker.turn_done.connect(lambda reply, meta, cost, st: self.on_reply(reply, meta, cost, st, final=False))
+        self.worker.push_delivered.connect(lambda ep=self.epoch: self.on_push_delivered(ep))
         self.worker.start()
 
     def stop_generation(self) -> None:
@@ -889,17 +1015,21 @@ class AIChatWindow(QMainWindow):
             self.worker.stop()
             self.refresh_badge()
 
-    def on_reply(self, reply: str, meta: str, cost: float, state_tuple: object) -> None:
+    def on_reply(self, reply: str, meta: str, cost: float, state_tuple: object, final: bool = True) -> None:
+        """One finished reply. final=False: a pushed message started another turn, so Claude is still working."""
         csid, ctotal, *rest = state_tuple  # type: ignore[misc]
         ok = rest[0] if rest else True
         uncounted = bool(rest[1]) if len(rest) > 1 else False
+        silent = bool(rest[2]) if len(rest) > 2 else False        # an earlier turn already showed the reply
         if uncounted:                     # it cost money we cannot price: say so until the next calibration
             self.usage["claude_uncounted"] = int(self.usage.get("claude_uncounted", 0)) + 1
             save_usage(self.usage)
             self.update_balance_lbl()
         stale = getattr(self.worker, "epoch", self.epoch) != self.epoch      # reply of a chat the user already left
         model = getattr(self.worker, "model", "")
-        compacting, self.compacting = self.compacting, False
+        compacting = self.compacting
+        if final:
+            self.compacting = False
         if not stale:
             self.claude_sid = csid
             self.claude_cost_base = ctotal
@@ -908,7 +1038,7 @@ class AIChatWindow(QMainWindow):
             self.usage["claude_msgs"] = int(self.usage.get("claude_msgs", 0)) + 1
             save_usage(self.usage)
             self.update_balance_lbl()
-        if not stale:
+        if not stale and not silent:
             secs = int(time.time() - self.t0)
             if ok and compacting:
                 lc = last_compact(csid)
@@ -922,10 +1052,21 @@ class AIChatWindow(QMainWindow):
                 self.append_msg("Claude", reply, "assistant", "stopped")
             else:
                 self.append_msg("Claude", reply, "error", "failed")
+        if not final:
+            self.t0 = time.time()                       # the next turn is timed on its own
+            self.clear_live()
+            self.refresh_ctx()
+            self.refresh_badge()
+            return
         self.busy = False
         self.busy_timer.stop()
         self.clear_live()
         self.refresh_ctx()
+        if self.pushed:                                 # Claude never took these in: they go out next, in order
+            if not stale:
+                self.queue[:0] = self.pushed
+            self.pushed = []
+            self.refresh_queue_ui()
         if not ok and not stale and self.queue:
             self.queue_paused = True
         self.stopping = False

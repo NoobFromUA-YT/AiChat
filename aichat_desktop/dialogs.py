@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QRadioButton,
     QVBoxLayout,
@@ -296,3 +297,38 @@ class ChatsDialog(QDialog):
             chats.delete(cid)
             self.deleted.append(cid)
             self.refill()
+
+
+class EditMessageDialog(QDialog):
+    """Change the text of a queued message (its images stay attached)."""
+
+    def __init__(self, parent: QWidget, text: str, n_images: int = 0) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Edit queued message")
+        self.n_images = n_images
+        lay = QVBoxLayout(self)
+        lay.setSpacing(S(8))
+        lay.addWidget(_wrapped("This message has not been sent yet. Change it and press Save."
+                               + (f" Its {n_images} image{'s' if n_images != 1 else ''} stay attached." if n_images else "")))
+        self.edit = QPlainTextEdit()
+        self.edit.setObjectName("inputBox")
+        self.edit.setPlainText(text)
+        self.edit.setMinimumSize(S(520), S(180))
+        self.edit.textChanged.connect(self._check)
+        lay.addWidget(self.edit, 1)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        lay.addWidget(self.buttons)
+        self._check()
+        cur = self.edit.textCursor()
+        cur.movePosition(cur.MoveOperation.End)
+        self.edit.setTextCursor(cur)
+
+    def _check(self) -> None:
+        """A message needs words or an image."""
+        ok = bool(self.text()) or self.n_images > 0
+        self.buttons.button(QDialogButtonBox.StandardButton.Save).setEnabled(ok)
+
+    def text(self) -> str:
+        return self.edit.toPlainText().strip()

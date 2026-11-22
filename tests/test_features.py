@@ -12,10 +12,11 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 for k in ("DISPLAY", "QT_SCREEN_SCALE_FACTORS", "SESSION_MANAGER"):
     os.environ.pop(k, None)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from aichat_desktop import app, chats, config, costs, dialogs, display, mdhtml, streaming, themes  # noqa: E402
+from aichat_desktop import app, chats, config, costs, dialogs, display, mdhtml, pasting, streaming, themes  # noqa: E402
 from aichat_desktop.export import export_markdown  # noqa: E402
 from aichat_desktop.mdhtml import md_to_html  # noqa: E402
-from PyQt6.QtCore import QUrl  # noqa: E402
+from PyQt6.QtCore import QMimeData, QUrl  # noqa: E402
+from PyQt6.QtGui import QImage  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 APP = QApplication.instance() or QApplication([])
@@ -413,6 +414,85 @@ class Images(unittest.TestCase):
         wk.run()
         files = list(worker.image_dir().glob("aichat_*.png"))
         self.assertEqual(len(files), 1); self.assertTrue(str(files[0]).startswith(self.cache))
+
+
+class Pasting(unittest.TestCase):
+    """The message box takes plain text only: no fonts, colours or backgrounds from web pages, no invisible characters."""
+
+    PAGE = ('<html><body><!--StartFragment--><span style="color:#ffffff;background-color:#101010;font-family:Georgia;'
+            'font-size:31px"><b>Hello</b>&nbsp;<a href="https://example.com">world</a></span><p>second&#8203; line</p>'
+            '<!--EndFragment--></body></html>')
+
+    def setUp(self):
+        self.box = app.PromptEdit()
+        self.images = []
+        self.box.image_pasted.connect(self.images.append)
+
+    def paste(self, md):
+        self.box.insertFromMimeData(md)
+
+    def test_rich_text_is_ignored(self):
+        self.assertFalse(self.box.acceptRichText())
+        md = QMimeData(); md.setHtml(self.PAGE); md.setText("Hello world\nsecond line")
+        self.paste(md)
+        self.assertEqual(self.box.toPlainText(), "Hello world\nsecond line")
+        self.assertNotIn("Georgia", self.box.toHtml()); self.assertNotIn("#ffffff", self.box.toHtml().lower())
+        self.assertNotIn("31px", self.box.toHtml())
+
+    def test_html_only_clipboard_becomes_text(self):
+        md = QMimeData(); md.setHtml(self.PAGE)
+        self.paste(md)
+        self.assertEqual(self.box.toPlainText().split(), ["Hello", "world", "second", "line"])
+        self.assertNotIn("Georgia", self.box.toHtml())
+
+    def test_invisible_characters_and_odd_spaces_are_cleaned(self):
+        self.assertEqual(pasting.clean_text("a\u00a0b\u202fc\u200bd\ufeffe\u00adf\u2060g"), "a b cdefg")
+        self.assertEqual(pasting.clean_text("x\r\ny\rz\u2028w"), "x\ny\nz\nw")
+        self.assertEqual(pasting.clean_text("a\x00b\x0bc\x1bd\te"), "abcd\te")                       # tab stays
+        self.assertEqual(pasting.clean_text("\u202ereversed\u202c"), "reversed")                         # direction overrides
+        self.assertEqual(pasting.clean_text("caf\u00e9 \U0001f468\u200d\U0001f4bb \u0436"), "caf\u00e9 \U0001f468\u200d\U0001f4bb \u0436")  # emoji joiner, accents, Cyrillic stay
+
+    def test_code_keeps_its_indentation_and_blank_lines(self):
+        code = "def f():\n    return 1\n\n\nprint(f())\n"
+        md = QMimeData(); md.setText(code); self.paste(md)
+        self.assertEqual(self.box.toPlainText(), code)
+
+    def test_pasted_text_goes_in_at_the_cursor(self):
+        self.box.setPlainText("ab"); c = self.box.textCursor(); c.setPosition(1); self.box.setTextCursor(c)
+        md = QMimeData(); md.setText("XY"); self.paste(md)
+        self.assertEqual(self.box.toPlainText(), "aXYb")
+
+    def test_a_screenshot_still_becomes_an_attachment(self):
+        img = QImage(4, 4, QImage.Format.Format_RGB32); img.fill(0xff0000)
+        md = QMimeData(); md.setImageData(img); self.paste(md)
+        self.assertEqual(len(self.images), 1); self.assertEqual(self.box.toPlainText(), "")
+
+    def test_copied_picture_with_its_html_is_an_attachment_not_markup(self):
+        img = QImage(4, 4, QImage.Format.Format_RGB32); img.fill(0x00ff00)
+        md = QMimeData(); md.setImageData(img); md.setHtml('<img src="https://example.com/a.png">'); self.paste(md)
+        self.assertEqual(len(self.images), 1); self.assertEqual(self.box.toPlainText(), "")
+
+    def test_text_wins_over_a_picture_of_the_same_selection(self):
+        img = QImage(4, 4, QImage.Format.Format_RGB32); img.fill(0)
+        md = QMimeData(); md.setImageData(img); md.setText("cell A1"); self.paste(md)
+        self.assertEqual(self.box.toPlainText(), "cell A1"); self.assertEqual(self.images, [])
+
+    def test_files_paste_as_their_paths(self):
+        md = QMimeData(); md.setUrls([QUrl.fromLocalFile("/tmp/a b.txt"), QUrl("https://example.com/x")])
+        self.paste(md)
+        self.assertEqual(self.box.toPlainText(), "/tmp/a b.txt\nhttps://example.com/x")
+
+    def test_ctrl_v_and_the_menu_take_the_same_road(self):
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+        md = QMimeData(); md.setHtml(self.PAGE); md.setText("plain")
+        APP.clipboard().setMimeData(md)
+        QTest.keyClick(self.box, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
+        self.assertEqual(self.box.toPlainText(), "plain"); self.assertNotIn("Georgia", self.box.toHtml())
+
+    def test_empty_clipboard_changes_nothing(self):
+        self.paste(QMimeData()); self.assertEqual(self.box.toPlainText(), ""); self.assertEqual(self.images, [])
+        self.assertFalse(self.box.canInsertFromMimeData(QMimeData()))
 
 
 class Export(unittest.TestCase):

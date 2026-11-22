@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- **Push a message while Claude works.** Enter now hands your message to the running reply (it reads it at its next step; if it is only writing text, it becomes the next turn). **Ctrl+Enter** or the new **Queue** button still queues it for after the reply. A pushed message shows as "Pushed" until Claude takes it in, then appears in the chat. Needs `claude` with stream-json input (Claude Code 2.x); every call now goes through `--input-format stream-json --replay-user-messages`.
+- **Queued messages can be edited** (Edit button; its images stay attached) and sent into the running reply with **Push now**, besides the existing remove button.
+- **Pasting is plain text.** The message box no longer keeps fonts, colours or backgrounds copied from web pages and documents, and strips zero-width / no-break / direction characters; screenshots still paste as images, files paste as their paths.
+- A reply that was split in two by a pushed message shows two cards, each with its own cost.
 - Fixed: unchecked radio buttons and checkboxes were invisible in the dark theme; the Chats list rows ran together and showed whole paths (now spaced, folder name, full path in a tooltip); the last line of wrapped text in the first-run dialog was clipped.
 - More screenshots in the README (`tools/make_screenshots.py` makes them: 2x, English locale, no real paths).
 
