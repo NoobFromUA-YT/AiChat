@@ -7,7 +7,6 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os != 'ubuntu-latest' }}      # Windows support is new and not verified yet: it reports, it does not block
     strategy:
       fail-fast: false
       matrix:

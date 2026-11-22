@@ -53,9 +53,9 @@ Run from a checkout without installing: `pip install PyQt6 && python3 -m aichat_
 
 The code avoids Linux-only calls (config in `%APPDATA%\aichat-desktop`, `claude.exe` is preferred over the npm
 `claude.cmd` shim, no console window flashes, UTF-8 pipes, a windowed `aichat-desktop.exe` from `pip install .`). Claude
-Code on Windows needs [Git for Windows](https://git-scm.com/download/win). **This has not been run on a real Windows
-machine.** CI has a Windows test job that reports but does not block; `--install-desktop` and the packages are Linux
-only (pin `aichat-desktop.exe` to the Start menu yourself). Bug reports from Windows users are very welcome.
+Code on Windows needs [Git for Windows](https://git-scm.com/download/win). The whole test suite passes on a real Windows runner in CI (Windows Server, Python 3.12); nobody has used the window on a Windows
+desktop yet, so treat Windows as beta. `--install-desktop` and the packages are Linux only (pin `aichat-desktop.exe` to
+the Start menu yourself). Bug reports from Windows users are very welcome.
 
 ## First start
 
@@ -120,7 +120,7 @@ python3 tools/make_screenshots.py   # redo docs/screenshot-*.png
 Layout: `aichat_desktop/app.py` (window), `worker.py` (one `claude` call, streaming), `streaming.py` (event parser),
 `config.py` (paths, settings, key, finding `claude`), `chats.py`, `costs.py`, `export.py`, `dialogs.py`, `display.py`,
 `mdhtml.py` (Markdown → Qt HTML), `themes.py`, `desktop.py` (menu entry). CI (`.github/workflows/ci.yml`) runs lint and
-the tests on Python 3.10 to 3.13 (plus a non-blocking Windows run) and builds the `.deb` and the AppImage.
+the tests on Python 3.10 to 3.13 and on Windows and builds the `.deb` and the AppImage.
 
 ## Privacy
 
