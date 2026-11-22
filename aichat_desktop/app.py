@@ -60,6 +60,9 @@ class ClickLabel(QLabel):
         super().mouseReleaseEvent(ev)
 
 
+EFFORTS = ["xHigh", "High", "Medium", "Low"]      # passed lower-cased as `claude --effort`
+
+
 class PromptEdit(QTextEdit):
     """Message box: Enter sends / pushes, Ctrl+Enter queues, Shift+Enter adds a line. Pastes plain text and screenshots only."""
 
@@ -156,9 +159,9 @@ class AIChatWindow(QMainWindow):
         top.addWidget(self.model_box)
 
         self.effort_box = QComboBox()
-        self.effort_box.addItems(["High", "Medium", "Low"])
-        self.effort_box.setToolTip("Thinking / Effort level")
-        self.effort_box.setCurrentText(self.settings["effort"] if self.settings["effort"] in ("High", "Medium", "Low") else "High")
+        self.effort_box.addItems(EFFORTS)
+        self.effort_box.setToolTip("Thinking / Effort level (xHigh thinks hardest; slower and costs more)")
+        self.effort_box.setCurrentText(self.settings["effort"] if self.settings["effort"] in EFFORTS else "High")
         self.effort_box.currentIndexChanged.connect(self.on_pick_changed)
         top.addWidget(self.effort_box)
 

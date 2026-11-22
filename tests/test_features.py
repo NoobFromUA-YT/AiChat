@@ -655,6 +655,15 @@ class Permission(Base):
         self.new_window()
         self.assertEqual((self.w.model_box.currentIndex(), self.w.effort_box.currentText()), (1, "Low"))
 
+    def test_xhigh_is_offered_remembered_and_passed_to_claude(self):
+        from aichat_desktop import worker
+        self.assertEqual([self.w.effort_box.itemText(i) for i in range(self.w.effort_box.count())], ["xHigh", "High", "Medium", "Low"])
+        self.w.effort_box.setCurrentText("xHigh")
+        self.new_window()
+        self.assertEqual(self.w.effort_box.currentText(), "xHigh")
+        cmd = worker.ChatWorker("sonnet", self.w.effort_box.currentText().lower(), "hi", [], None, {}, 0.0, claude_bin="/bin/claude").build_command()
+        self.assertEqual(cmd[cmd.index("--effort") + 1], "xhigh")
+
 
 class FirstRun(Base):
     def setUp(self):

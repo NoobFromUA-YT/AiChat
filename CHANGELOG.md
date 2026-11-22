@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- New effort level **xHigh** (above High) in the effort box; it is passed to `claude --effort xhigh`.
 - **Push a message while Claude works.** Enter now hands your message to the running reply (it reads it at its next step; if it is only writing text, it becomes the next turn). **Ctrl+Enter** or the new **Queue** button still queues it for after the reply. A pushed message shows as "Pushed" until Claude takes it in, then appears in the chat. Needs `claude` with stream-json input (Claude Code 2.x); every call now goes through `--input-format stream-json --replay-user-messages`.
 - **Queued messages can be edited** (Edit button; its images stay attached) and sent into the running reply with **Push now**, besides the existing remove button.
 - **Pasting is plain text.** The message box no longer keeps fonts, colours or backgrounds copied from web pages and documents, and strips zero-width / no-break / direction characters; screenshots still paste as images, files paste as their paths.
