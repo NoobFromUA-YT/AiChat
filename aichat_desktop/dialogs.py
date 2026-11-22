@@ -33,6 +33,7 @@ from .display import S
 def _wrapped(text: str) -> QLabel:
     lbl = QLabel(text)
     lbl.setWordWrap(True)
+    lbl.setContentsMargins(0, 0, 0, S(3))          # a wrapped label's last line was clipped by a pixel or two
     return lbl
 
 
@@ -103,6 +104,7 @@ class FirstRunDialog(QDialog):
     def __init__(self, parent: QWidget | None, claude_path: str | None, has_env_key: bool = False) -> None:
         super().__init__(parent)
         self.setWindowTitle("Welcome to AI Chat")
+        self.setMinimumWidth(S(560))          # wrapped labels need a real width, else their last line is clipped
         self.result_key = ""
         self.result_budget = 0.0
         lay = QVBoxLayout(self)
@@ -143,6 +145,13 @@ class FirstRunDialog(QDialog):
         self.ok_btn.clicked.connect(self.accept_values)
         self.skip_btn.clicked.connect(self.reject)
         lay.addWidget(box)
+
+    def showEvent(self, ev) -> None:  # noqa: N802
+        super().showEvent(ev)
+        lay = self.layout()
+        need = lay.totalHeightForWidth(self.width())     # wrapped labels are taller when the dialog is narrow
+        if need > self.height():
+            self.resize(self.width(), need)
 
     def accept_values(self) -> None:
         key = self.key_edit.text().strip() if self.r_key.isChecked() else ""
@@ -247,10 +256,11 @@ class ChatsDialog(QDialog):
         self.list.clear()
         for c in chats.list_chats():
             when = time.strftime("%d %b %Y %H:%M", time.localtime(c["updated"]))
-            where = f" \u00b7 {c['cwd']}" if c["cwd"] else ""
+            where = f" \u00b7 {Path(c['cwd']).name or c['cwd']}" if c["cwd"] else ""
             mark = "\u25cf " if c["id"] == self.current_id else ""
             item = QListWidgetItem(f"{mark}{c['title']}\n{when} \u00b7 {c['n']} messages{where}")
             item.setData(Qt.ItemDataRole.UserRole, c["id"])
+            item.setToolTip(c["cwd"] or "")
             self.list.addItem(item)
         has = self.list.count() > 0
         if has:

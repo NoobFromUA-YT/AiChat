@@ -62,8 +62,14 @@ TEMPLATE = """
 QMainWindow, #root { background: @bg@; color: @fg@; }
 QLabel { background: transparent; color: @fg@; }
 QDialog { background: @bg@; color: @fg@; }
-QCheckBox, QRadioButton { color: @fg@; background: transparent; }
+QCheckBox, QRadioButton { color: @fg@; background: transparent; spacing: 8px; }
+QCheckBox::indicator, QRadioButton::indicator { width: 16px; height: 16px; background: @panel@; border: 1px solid @border@; border-radius: 4px; }
+QRadioButton::indicator { border-radius: 9px; }
+QCheckBox::indicator:hover, QRadioButton::indicator:hover { border-color: @accent@; }
+QCheckBox::indicator:checked, QRadioButton::indicator:checked { background: @accent@; border-color: @accent@; }
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled { background: @btn@; border-color: @border_soft@; }
 QLineEdit, QDoubleSpinBox, QListWidget { background: @panel@; color: @fg@; border: 1px solid @border_input@; border-radius: 4px; padding: 4px; selection-background-color: @sel@; selection-color: @sel_fg@; }
+QListWidget::item { padding: 8px 6px; border-bottom: 1px solid @border_soft@; }
 QListWidget::item:selected { background: @sel@; color: @sel_fg@; }
 #errLbl { color: @error_fg@; }
 #warnLbl { color: @notice_fg@; }
